@@ -80,10 +80,12 @@ class DatabaseManager:
             with conn.cursor() as cursor:
                 cursor.execute(query, params)
                 result = cursor.fetchall()
+                conn.commit()  # Commit successful query
                 return [dict(row) for row in result]
         except Exception as e:
             logger.error(f"Sync query execution failed: {e}")
             conn.rollback()
+            conn.commit()  # End the aborted transaction so future queries work
             raise
     
     async def execute_with_timeout(self, query: str, timeout: int = 30) -> List[Dict[str, Any]]:

@@ -131,10 +131,10 @@ class GenerationAgent(AssistantAgent):
             
             logger.info(f"Generating {self.num_candidates} SQL candidates for: {user_request[:100]}...")
             
-            # Generate candidates concurrently
+            # Generate candidates with immediate refinement (concurrent)
             candidate_tasks = []
             for i in range(self.num_candidates):
-                task = self._generate_single_candidate(user_request, i)
+                task = self._generate_and_refine_candidate(user_request, i)
                 candidate_tasks.append(task)
             
             candidates = await asyncio.gather(*candidate_tasks, return_exceptions=True)
@@ -143,14 +143,11 @@ class GenerationAgent(AssistantAgent):
             valid_candidates = []
             for i, candidate in enumerate(candidates):
                 if isinstance(candidate, Exception):
-                    logger.error(f"Candidate {i} generation failed: {candidate}")
+                    logger.error(f"Candidate {i} generation+refinement failed: {candidate}")
                 else:
                     valid_candidates.append(candidate)
             
             self.candidates = valid_candidates
-            
-            # Start self-refinement process
-            await self._self_refinement_process()
             
             result = f"""Generated {len(valid_candidates)} SQL candidates successfully!
             
@@ -174,6 +171,21 @@ Refinement iterations: {candidate.iteration}
             logger.error(f"Candidate generation failed: {e}")
             raise
     
+    async def _generate_and_refine_candidate(self, user_request: str, candidate_id: int) -> SQLCandidate:
+        """Generate a single SQL candidate and immediately refine it"""
+        try:
+            # First generate the candidate
+            candidate = await self._generate_single_candidate(user_request, candidate_id)
+            
+            # Then immediately refine it
+            refined_candidate = await self._refine_candidate(candidate, candidate_id)
+            
+            return refined_candidate
+            
+        except Exception as e:
+            logger.error(f"Generate+refine candidate {candidate_id} failed: {e}")
+            raise
+
     async def _generate_single_candidate(self, user_request: str, candidate_id: int) -> SQLCandidate:
         """Generate a single SQL candidate"""
         try:
@@ -189,7 +201,7 @@ Refinement iterations: {candidate.iteration}
                 ),
                 system_prompt=PromptTemplates.GENERATION_SYSTEM_PROMPT,
                 temperature=temperature,
-                max_tokens=4000  # Generous limit for Qwen thinking + SQL generation
+                max_tokens=8000  # Very generous limit for Qwen thinking + SQL generation
             )
             
             # Extract SQL from response
@@ -214,19 +226,6 @@ Refinement iterations: {candidate.iteration}
         except Exception as e:
             logger.error(f"Single candidate generation failed: {e}")
             raise
-    
-    async def _self_refinement_process(self):
-        """Apply self-refinement to all candidates"""
-        logger.info("Starting self-refinement process...")
-        
-        for i, candidate in enumerate(self.candidates):
-            try:
-                refined_candidate = await self._refine_candidate(candidate, i)
-                self.candidates[i] = refined_candidate
-            except Exception as e:
-                logger.error(f"Refinement failed for candidate {i}: {e}")
-        
-        logger.info("Self-refinement process completed")
     
     async def _refine_candidate(self, candidate: SQLCandidate, candidate_id: int) -> SQLCandidate:
         """Apply iterative refinement to a single candidate"""
@@ -294,7 +293,7 @@ Refinement iterations: {candidate.iteration}
                 ),
                 system_prompt=PromptTemplates.REFINEMENT_SYSTEM_PROMPT,
                 temperature=0.1,  # Low temperature for refinement
-                max_tokens=3000  # Generous limit for Qwen thinking + SQL refinement
+                max_tokens=6000  # Very generous limit for Qwen thinking + SQL refinement
             )
             
             refined_sql = self._extract_sql_from_response(refinement_response.content)
@@ -419,6 +418,11 @@ Refinement History:
     
     def _extract_sql_from_response(self, response: str) -> str:
         """Extract SQL query from LLM response"""
+        # Handle None or empty response
+        if not response:
+            logger.warning("Empty or None response received")
+            return "SELECT 1 as error_placeholder -- Empty response from LLM"
+        
         # Look for SQL code blocks
         import re
         
@@ -438,7 +442,7 @@ Refinement History:
             return select_match.group(1).strip()
         
         # Return cleaned response as fallback
-        return response.strip()
+        return response.strip() if response else "SELECT 1 as fallback_query"
     
     def _extract_user_request(self, message: str) -> str:
         """Extract user request from agent message"""

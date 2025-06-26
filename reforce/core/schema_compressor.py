@@ -265,6 +265,9 @@ class SchemaCompressor:
         """
         Get the complete compressed schema as text for LLM consumption
         """
+        if self.config.ultra_compact_mode:
+            return self._get_ultra_compact_schema()
+        
         compressed_groups, ungrouped_tables, compression_ratio = self.compress_database_schema()
         
         schema_parts = [
@@ -321,3 +324,116 @@ class SchemaCompressor:
             }
         
         return summary
+    
+    def _get_ultra_compact_schema(self) -> str:
+        """
+        Get ultra compact schema representation
+        Format: table_name: col1, col2, fk_col->ref_table, col3
+        """
+        try:
+            all_tables = self.db_manager.get_all_tables()
+            compact_lines = [f"-- ULTRA COMPACT SCHEMA ({len(all_tables)} tables)"]
+            
+            for table in all_tables:
+                try:
+                    compact_table = self._get_ultra_compact_table(table)
+                    if compact_table:
+                        compact_lines.append(compact_table)
+                except Exception as e:
+                    logger.warning(f"Could not generate ultra compact format for {table}: {e}")
+                    compact_lines.append(f"{table}: (schema unavailable)")
+            
+            return "\n".join(compact_lines)
+            
+        except Exception as e:
+            logger.error(f"Ultra compact schema generation failed: {e}")
+            return "-- Ultra compact schema unavailable"
+    
+    def _get_ultra_compact_table(self, table_name: str) -> str:
+        """
+        Get ultra compact representation of a single table
+        Format: table_name: col1, col2, fk_col->ref_table, col3
+        """
+        try:
+            schema = self.db_manager.get_table_schema(table_name)
+            if not schema:
+                return f"{table_name}: (no columns)"
+            
+            # Detect foreign keys
+            foreign_keys = self._detect_foreign_keys(table_name, schema)
+            
+            # Build column list with FK references
+            columns = []
+            for col_info in schema:
+                col_name = col_info['column_name']
+                
+                # Check if this column is a foreign key
+                if col_name in foreign_keys:
+                    ref_table = foreign_keys[col_name]
+                    columns.append(f"{col_name}->{ref_table}")
+                else:
+                    columns.append(col_name)
+            
+            return f"{table_name}: {', '.join(columns)}"
+            
+        except Exception as e:
+            logger.error(f"Ultra compact format failed for {table_name}: {e}")
+            return f"{table_name}: (error: {str(e)})"
+    
+    def _detect_foreign_keys(self, table_name: str, schema: List[Dict]) -> Dict[str, str]:
+        """
+        Detect foreign key relationships using common patterns
+        Returns dict mapping column_name -> referenced_table
+        """
+        foreign_keys = {}
+        
+        # Get all table names for reference
+        try:
+            all_tables = set(self.db_manager.get_all_tables())
+        except Exception:
+            all_tables = set()
+        
+        for col_info in schema:
+            col_name = col_info['column_name'].lower()
+            
+            # Pattern 1: column_name ends with 'id' and matches table name
+            # e.g., 'userid' -> 'user', 'orderid' -> 'order'
+            if col_name.endswith('id') and len(col_name) > 2:
+                potential_table = col_name[:-2]  # Remove 'id' suffix
+                
+                # Check exact match
+                if potential_table in all_tables:
+                    foreign_keys[col_info['column_name']] = potential_table
+                    continue
+                
+                # Check with 's' suffix (plurals)
+                if potential_table + 's' in all_tables:
+                    foreign_keys[col_info['column_name']] = potential_table + 's'
+                    continue
+                
+                # Check without 's' suffix (singular)
+                if potential_table.endswith('s') and potential_table[:-1] in all_tables:
+                    foreign_keys[col_info['column_name']] = potential_table[:-1]
+                    continue
+            
+            # Pattern 2: column_name format 'table_id' or 'tableid'
+            # e.g., 'user_id' -> 'user', 'storage_id' -> 'storage'
+            if '_id' in col_name:
+                potential_table = col_name.replace('_id', '')
+                if potential_table in all_tables:
+                    foreign_keys[col_info['column_name']] = potential_table
+                    continue
+            
+            # Pattern 3: Direct table name matches
+            # e.g., column 'storage' and table 'storage' exists
+            if col_name in all_tables and col_name != table_name.lower():
+                foreign_keys[col_info['column_name']] = col_name
+                continue
+            
+            # Pattern 4: Check if column name is substring of any table
+            for table in all_tables:
+                if col_name in table.lower() and col_name != table_name.lower():
+                    foreign_keys[col_info['column_name']] = table
+                    break
+        
+        return foreign_keys

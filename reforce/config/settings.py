@@ -37,6 +37,7 @@ class ReFoRCEConfig:
     # Database compression settings
     compression_threshold: int = int(os.getenv("COMPRESSION_THRESHOLD", "100000"))  # 100KB
     max_tables_per_group: int = int(os.getenv("MAX_TABLES_PER_GROUP", "50"))
+    ultra_compact_mode: bool = os.getenv("ULTRA_COMPACT_MODE", "false").lower() == "true"
     
     # Candidate generation settings
     num_candidates: int = int(os.getenv("NUM_CANDIDATES", "8"))
