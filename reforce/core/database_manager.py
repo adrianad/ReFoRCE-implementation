@@ -36,20 +36,44 @@ class DatabaseManager:
     def get_sync_connection(self):
         """Get synchronous connection for simple operations"""
         if not self._sync_connection or self._sync_connection.closed:
-            try:
-                self._sync_connection = psycopg2.connect(
-                    host=self.config.host,
-                    port=self.config.port,
-                    database=self.config.database,
-                    user=self.config.username,
-                    password=self.config.password,
-                    cursor_factory=RealDictCursor
-                )
-                logger.info("Sync connection established")
-            except Exception as e:
-                logger.error(f"Failed to establish sync connection: {e}")
-                raise
+            self._create_sync_connection()
+        
+        # Check if connection is in aborted state and reset if needed
+        try:
+            with self._sync_connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+        except Exception as e:
+            logger.warning(f"Connection check failed, resetting: {e}")
+            self._reset_sync_connection()
+        
         return self._sync_connection
+    
+    def _create_sync_connection(self):
+        """Create a new synchronous connection"""
+        try:
+            self._sync_connection = psycopg2.connect(
+                host=self.config.host,
+                port=self.config.port,
+                database=self.config.database,
+                user=self.config.username,
+                password=self.config.password,
+                cursor_factory=RealDictCursor
+            )
+            logger.info("Sync connection established")
+        except Exception as e:
+            logger.error(f"Failed to establish sync connection: {e}")
+            raise
+    
+    def _reset_sync_connection(self):
+        """Reset the synchronous connection"""
+        if self._sync_connection and not self._sync_connection.closed:
+            try:
+                self._sync_connection.close()
+            except Exception:
+                pass
+        self._sync_connection = None
+        self._create_sync_connection()
     
     @asynccontextmanager
     async def get_async_connection(self):
@@ -75,6 +99,7 @@ class DatabaseManager:
     
     def execute_query_sync(self, query: str, params: Optional[Tuple] = None) -> List[Dict[str, Any]]:
         """Execute SELECT query synchronously"""
+        conn = None
         try:
             conn = self.get_sync_connection()
             with conn.cursor() as cursor:
@@ -84,8 +109,14 @@ class DatabaseManager:
                 return [dict(row) for row in result]
         except Exception as e:
             logger.error(f"Sync query execution failed: {e}")
-            conn.rollback()
-            conn.commit()  # End the aborted transaction so future queries work
+            if conn:
+                try:
+                    conn.rollback()
+                    conn.commit()  # End the aborted transaction so future queries work
+                except Exception as rollback_error:
+                    logger.error(f"Rollback failed: {rollback_error}")
+                    # Force connection reset on rollback failure
+                    self._reset_sync_connection()
             raise
     
     async def execute_with_timeout(self, query: str, timeout: int = 30) -> List[Dict[str, Any]]:
