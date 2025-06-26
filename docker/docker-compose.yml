@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  reforce-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      # Database configuration
+      - DB_HOST=${DB_HOST:-localhost}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-your_database}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-password}
+      
+      # vLLM configuration
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://localhost:8000/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-meta-llama/Meta-Llama-3.1-8B-Instruct}
+      - VLLM_TEMPERATURE=${VLLM_TEMPERATURE:-0.1}
+      
+      # ReFoRCE configuration
+      - NUM_CANDIDATES=${NUM_CANDIDATES:-8}
+      - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD:-0.7}
+      - MAX_REFINEMENT_ITERATIONS=${MAX_REFINEMENT_ITERATIONS:-5}
+    volumes:
+      - ../logs:/app/logs
+      - ../.env:/app/.env:ro
+    depends_on:
+      - postgres
+    networks:
+      - reforce-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=${DB_NAME:-your_database}
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../sample_data:/docker-entrypoint-initdb.d:ro
+    networks:
+      - reforce-network
+    restart: unless-stopped
+
+  # Optional: Include vLLM service
+  vllm:
+    image: vllm/vllm-openai:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_NAME=${VLLM_MODEL:-meta-llama/Meta-Llama-3.1-8B-Instruct}
+    volumes:
+      - vllm_cache:/root/.cache
+    networks:
+      - reforce-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  postgres_data:
+  vllm_cache:
+
+networks:
+  reforce-network:
+    driver: bridge

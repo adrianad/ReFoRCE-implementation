@@ -278,6 +278,84 @@ This implementation is based on the ReFoRCE research paper and is provided for e
 - [AutoGen Framework](https://github.com/microsoft/autogen)
 - [Spider 2.0 Benchmark](https://spider2-sql.github.io/)
 
+## API Server Deployment
+
+Deploy ReFoRCE as an OpenAI-compatible API server:
+
+### Quick Start
+```bash
+# Install API dependencies
+pip install -r api-requirements.txt
+
+# Start the API server
+python api_server.py --host 0.0.0.0 --port 8080
+```
+
+### Docker Deployment
+```bash
+# Build and run with Docker Compose
+cd docker
+docker-compose up -d
+
+# Or build manually
+docker build -f docker/Dockerfile -t reforce-api .
+docker run -p 8080:8080 --env-file .env reforce-api
+```
+
+### OpenAI-Compatible Usage
+
+**Using OpenAI Python client:**
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="not-needed"
+)
+
+response = client.chat.completions.create(
+    model="reforce-text-to-sql",
+    messages=[
+        {"role": "user", "content": "Show all users who registered last month"}
+    ]
+)
+
+print(response.choices[0].message.content)
+```
+
+**Using curl:**
+```bash
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "reforce-text-to-sql",
+    "messages": [
+      {"role": "user", "content": "Find top 10 customers by order value"}
+    ]
+  }'
+```
+
+### API Endpoints
+
+- `POST /v1/chat/completions` - OpenAI-compatible chat interface
+- `GET /v1/sql/direct?query=<text>` - Direct SQL generation
+- `GET /v1/models` - List available models
+- `GET /v1/schema/info` - Database schema information
+- `GET /health` - Health check
+
+### Integration Examples
+
+Run the client examples:
+```bash
+python client_examples.py
+```
+
+Compatible with:
+- OpenAI Python/JS clients
+- LangChain and LlamaIndex
+- Any OpenAI-compatible framework
+- Custom HTTP clients
+
 ## Acknowledgments
 
 - ReFoRCE research team for the original algorithm
