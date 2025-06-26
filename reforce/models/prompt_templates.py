@@ -66,6 +66,35 @@ class PromptTemplates:
     SQL Query:
     """
     
+    # Exploration-Enhanced Generation (ReFoRCE Stage 4)
+    EXPLORATION_ENHANCED_GENERATION_PROMPT = """
+    Generate a PostgreSQL SQL query using the original schema and exploration insights discovered through database analysis.
+    
+    Original Database Schema (𝒫init):
+    {schema_text}
+    
+    Column Exploration Data (𝒫column + ℛexploration):
+    {exploration_insights}
+    
+    Natural Language Request:
+    {user_request}
+    
+    Expected Answer Format (ℱ):
+    {answer_format}
+    
+    IMPORTANT: Use the exploration insights to understand:
+    - Actual column names and data types discovered
+    - Foreign key relationships found through analysis
+    - Sample data patterns and value ranges
+    - Table relationships and join conditions
+    - Data quality and null patterns
+    
+    The exploration insights provide real database structure information that may differ from or enhance the original schema. 
+    Prioritize the discovered insights when generating the SQL query.
+    
+    Generate a precise SQL query that leverages both the original schema and exploration discoveries:
+    """
+    
     # Self-Refinement Stage
     REFINEMENT_SYSTEM_PROMPT = """
     You are a SQL query optimizer and error correction specialist. Your task is to analyze SQL queries for errors and improve them based on execution feedback.

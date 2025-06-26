@@ -195,9 +195,17 @@ class ReFoRCEWorkflow:
     async def _execute_exploration_stage(self, user_request: str, voting_result: Dict) -> Dict[str, Any]:
         """Execute Stage 4: Column Exploration (for low confidence cases)"""
         try:
-            # Set exploration context
+            # Set exploration context with failed candidates from generation stage
             uncertain_areas = ["Low confidence from voting stage"]
-            self.exploration_agent.set_exploration_context(user_request, uncertain_areas)
+            failed_candidates = self._extract_failed_candidates_from_generation()
+            voting_uncertainty = voting_result.get('uncertainty_details', {})
+            
+            self.exploration_agent.set_exploration_context(
+                user_request, 
+                uncertain_areas, 
+                failed_candidates,
+                voting_uncertainty
+            )
             
             # Create exploration request
             exploration_message = TextMessage(
@@ -219,6 +227,60 @@ class ReFoRCEWorkflow:
             logger.error(f"Exploration stage failed: {e}")
             # Return empty result rather than failing entire pipeline
             return {"exploration_performed": False, "error": str(e)}
+    
+    def _extract_failed_candidates_from_generation(self) -> List[Dict]:
+        """Extract failed SQL candidates from generation stage for exploration analysis"""
+        failed_candidates = []
+        
+        try:
+            # Get generation results
+            generation_results = self.generation_agent.get_generation_results()
+            candidates = generation_results.get('candidates', [])
+            
+            for candidate in candidates:
+                # Consider candidates that failed execution or have low confidence
+                if (not candidate.get('success', True) or 
+                    candidate.get('confidence', 1.0) < 0.5 or
+                    candidate.get('validation_score', 1.0) < 0.5):
+                    
+                    failed_candidates.append({
+                        'sql': candidate.get('sql', ''),
+                        'error': self._get_candidate_error(candidate),
+                        'confidence': candidate.get('confidence', 0.0),
+                        'iteration': candidate.get('iteration', 0)
+                    })
+            
+            logger.info(f"Extracted {len(failed_candidates)} failed candidates for exploration analysis")
+            return failed_candidates
+            
+        except Exception as e:
+            logger.error(f"Failed to extract candidates for exploration: {e}")
+            return []
+    
+    def _get_candidate_error(self, candidate: Dict) -> str:
+        """Extract error message from candidate execution result"""
+        try:
+            # Check if there's a direct error field
+            if 'error' in candidate:
+                return str(candidate['error'])
+            
+            # Check if execution result has error info
+            if 'execution_result' in candidate:
+                execution_result = candidate['execution_result']
+                if hasattr(execution_result, 'error') and execution_result.error:
+                    return str(execution_result.error)
+                elif isinstance(execution_result, dict) and 'error' in execution_result:
+                    return str(execution_result['error'])
+            
+            # Fallback for low confidence cases
+            if candidate.get('confidence', 1.0) < 0.5:
+                return "Low confidence candidate"
+            
+            return "Unknown execution issue"
+            
+        except Exception as e:
+            logger.debug(f"Error extracting candidate error: {e}")
+            return "Error information unavailable"
     
     def _compile_final_result(
         self,
