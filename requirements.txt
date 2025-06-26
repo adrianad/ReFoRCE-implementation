@@ -1,10 +1,22 @@
-autogen-agentchat==0.4.0
+# AutoGen v0.6.1 - Latest stable version
+autogen-agentchat==0.6.1
+autogen-core==0.6.1
+autogen-ext[openai]==0.6.1
+
+# Database
 psycopg2-binary==2.9.9
-openai==1.54.5
-sqlparse==0.5.2
-pandas==2.2.3
-numpy==1.26.4
-asyncio==3.4.3
 asyncpg==0.29.0
+
+# LLM and AI
+openai>=1.54.0
+pydantic>=2.10.0
+
+# Data processing
+sqlparse==0.5.2
+pandas>=2.2.0
+numpy>=1.26.0
+
+# Utilities
 python-dotenv==1.0.1
-pydantic==2.10.3
+tenacity>=8.0.0
+aiofiles>=24.0.0

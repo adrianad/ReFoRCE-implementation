@@ -4,11 +4,14 @@ Stage 2: Generates SQL candidates and iteratively refines them
 """
 import logging
 import asyncio
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Sequence
 from dataclasses import dataclass
 from autogen_agentchat.agents import AssistantAgent
-from autogen_agentchat.messages import TextMessage
-from autogen_agentchat.base import Response
+from autogen_agentchat.messages import ChatMessage, TextMessage
+from autogen_agentchat.base import Response, TaskResult
+from autogen_core import CancellationToken
+from autogen_ext.models.openai import OpenAIChatCompletionClient
+from autogen_core.models import ModelInfo
 
 from ..core.database_manager import DatabaseManager
 from ..core.sql_executor import SQLExecutor, ExecutionResult
@@ -39,12 +42,30 @@ class GenerationAgent(AssistantAgent):
         name: str = "GenerationAgent",
         description: str = "SQL generation and refinement specialist",
         db_manager: Optional[DatabaseManager] = None,
-        llm_client: Optional[LLMClient] = None
+        llm_client: Optional[LLMClient] = None,
+        model_client: Optional[OpenAIChatCompletionClient] = None
     ):
-        super().__init__(name=name, description=description)
-        
+        # Initialize components
         self.db_manager = db_manager or DatabaseManager()
         self.llm_client = llm_client or LLMClient()
+        
+        # Create AutoGen model client if not provided
+        if model_client is None:
+            model_info = ModelInfo(
+                family="qwen",
+                vision=False,
+                function_calling=False,
+                json_output=False
+            )
+            model_client = OpenAIChatCompletionClient(
+                model=settings.llm.model_name,
+                api_key="dummy",  # vLLM doesn't require real API key
+                base_url=settings.llm.base_url,
+                model_info=model_info
+            )
+        
+        # Initialize base AssistantAgent with model client
+        super().__init__(name=name, description=description, model_client=model_client)
         self.sql_executor = SQLExecutor(self.db_manager)
         
         # Configuration
@@ -58,7 +79,11 @@ class GenerationAgent(AssistantAgent):
         self.candidates = []
         self.refinement_results = {}
     
-    async def on_messages(self, messages: List[TextMessage], cancellation_token) -> Response:
+    async def on_messages(
+        self, 
+        messages: Sequence[ChatMessage], 
+        cancellation_token: CancellationToken
+    ) -> Response:
         """Handle incoming messages for SQL generation and refinement"""
         try:
             latest_message = messages[-1]
