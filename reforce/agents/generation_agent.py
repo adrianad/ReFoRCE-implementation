@@ -321,6 +321,7 @@ Refinement iterations: {candidate.iteration}
         """
         Check if refinement has converged (self-consistency across iterations)
         Following ReFoRCE paper: terminate when same result achieved in consecutive iterations
+        Only check convergence when SQL actually changed between iterations
         """
         try:
             if candidate_id not in self.iteration_history:
@@ -334,11 +335,20 @@ Refinement iterations: {candidate.iteration}
             current_result = history[current_iteration]
             previous_result = history[current_iteration - 1]
             
-            # Both must be successful
+            # Check if SQL actually changed between iterations
+            current_sql = current_result['sql']
+            previous_sql = previous_result['sql']
+            
+            if current_sql == previous_sql:
+                # SQL didn't change - this is not refinement convergence, just repeated execution
+                logger.debug(f"Candidate {candidate_id}: SQL unchanged between iterations {current_iteration-1} and {current_iteration} - not checking convergence")
+                return False
+            
+            # Both must be successful for meaningful comparison
             if not (current_result['success'] and previous_result['success']):
                 return False
             
-            # Check if results are consistent
+            # Check if results are consistent across different SQL queries
             current_row_count = current_result['row_count']
             previous_row_count = previous_result['row_count']
             
@@ -347,9 +357,9 @@ Refinement iterations: {candidate.iteration}
                 logger.debug(f"Candidate {candidate_id}: Both iterations returned 0 rows - not considering consistent")
                 return False
             
-            # Check if row counts match (indicating same result)
+            # Check if row counts match (indicating convergence to same result with different SQL)
             if current_row_count == previous_row_count:
-                logger.info(f"Candidate {candidate_id}: Refinement converged - {current_row_count} rows in both iterations {current_iteration-1} and {current_iteration}")
+                logger.info(f"Candidate {candidate_id}: Refinement converged - {current_row_count} rows achieved with different SQL in iterations {current_iteration-1} and {current_iteration}")
                 return True
             
             return False
