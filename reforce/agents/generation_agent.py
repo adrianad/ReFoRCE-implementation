@@ -188,7 +188,8 @@ Refinement iterations: {candidate.iteration}
                     context=f"Generate SQL candidate #{candidate_id + 1}"
                 ),
                 system_prompt=PromptTemplates.GENERATION_SYSTEM_PROMPT,
-                temperature=temperature
+                temperature=temperature,
+                max_tokens=4000  # Generous limit for Qwen thinking + SQL generation
             )
             
             # Extract SQL from response
@@ -292,7 +293,8 @@ Refinement iterations: {candidate.iteration}
                     schema_text=self.compressed_schema
                 ),
                 system_prompt=PromptTemplates.REFINEMENT_SYSTEM_PROMPT,
-                temperature=0.1  # Low temperature for refinement
+                temperature=0.1,  # Low temperature for refinement
+                max_tokens=3000  # Generous limit for Qwen thinking + SQL refinement
             )
             
             refined_sql = self._extract_sql_from_response(refinement_response.content)
