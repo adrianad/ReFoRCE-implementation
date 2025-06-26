@@ -78,6 +78,7 @@ class GenerationAgent(AssistantAgent):
         self.compressed_schema = None
         self.candidates = []
         self.refinement_results = {}
+        self.iteration_history = {}  # Track results across refinement iterations
     
     async def on_messages(
         self, 
@@ -232,19 +233,32 @@ Refinement iterations: {candidate.iteration}
         current_candidate = candidate
         consecutive_failures = 0
         
+        # Initialize iteration history for this candidate
+        self.iteration_history[candidate_id] = []
+        
         for iteration in range(self.max_refinement_iterations):
             try:
                 # Execute current SQL
                 execution_result = await self.sql_executor.execute_sql_safe(current_candidate.sql)
                 current_candidate.execution_result = execution_result
                 
+                # Store result in iteration history
+                iteration_result = {
+                    'iteration': iteration,
+                    'sql': current_candidate.sql,
+                    'success': execution_result.success,
+                    'row_count': len(execution_result.data) if execution_result.success and execution_result.data else 0,
+                    'error': execution_result.error if not execution_result.success else None
+                }
+                self.iteration_history[candidate_id].append(iteration_result)
+                
                 if execution_result.success:
-                    # Success - check for self-consistency
+                    # Success - check for refinement convergence (self-consistency)
                     if iteration > 0:
-                        # Compare with previous result for consistency
-                        consistency_check = await self._check_self_consistency(current_candidate)
+                        # Compare with previous iteration result for consistency
+                        consistency_check = self._check_refinement_consistency(candidate_id, iteration)
                         if consistency_check:
-                            logger.info(f"Candidate {candidate_id} achieved self-consistency at iteration {iteration}")
+                            logger.info(f"Candidate {candidate_id} achieved refinement consistency at iteration {iteration}")
                             break
                     
                     # Update confidence based on success
@@ -303,28 +317,45 @@ Refinement iterations: {candidate.iteration}
             logger.error(f"SQL refinement failed: {e}")
             return sql  # Return original if refinement fails
     
-    async def _check_self_consistency(self, candidate: SQLCandidate) -> bool:
-        """Check if candidate has achieved self-consistency"""
+    def _check_refinement_consistency(self, candidate_id: int, current_iteration: int) -> bool:
+        """
+        Check if refinement has converged (self-consistency across iterations)
+        Following ReFoRCE paper: terminate when same result achieved in consecutive iterations
+        """
         try:
-            # Re-execute the query
-            second_result = await self.sql_executor.execute_sql_safe(candidate.sql)
-            
-            if not second_result.success:
+            if candidate_id not in self.iteration_history:
                 return False
             
-            # Compare results (simplified consistency check)
-            if candidate.execution_result and candidate.execution_result.success:
-                first_data = candidate.execution_result.data
-                second_data = second_result.data
-                
-                # Check if row counts match
-                if len(first_data or []) == len(second_data or []):
-                    return True
+            history = self.iteration_history[candidate_id]
+            if len(history) < 2:
+                return False
+            
+            # Get current and previous iteration results
+            current_result = history[current_iteration]
+            previous_result = history[current_iteration - 1]
+            
+            # Both must be successful
+            if not (current_result['success'] and previous_result['success']):
+                return False
+            
+            # Check if results are consistent
+            current_row_count = current_result['row_count']
+            previous_row_count = previous_result['row_count']
+            
+            # Require non-empty results for meaningful consistency
+            if current_row_count == 0 and previous_row_count == 0:
+                logger.debug(f"Candidate {candidate_id}: Both iterations returned 0 rows - not considering consistent")
+                return False
+            
+            # Check if row counts match (indicating same result)
+            if current_row_count == previous_row_count:
+                logger.info(f"Candidate {candidate_id}: Refinement converged - {current_row_count} rows in both iterations {current_iteration-1} and {current_iteration}")
+                return True
             
             return False
             
         except Exception as e:
-            logger.error(f"Self-consistency check failed: {e}")
+            logger.error(f"Refinement consistency check failed for candidate {candidate_id}: {e}")
             return False
     
     async def _validate_all_candidates(self) -> str:
