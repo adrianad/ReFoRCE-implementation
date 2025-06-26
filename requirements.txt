@@ -1,0 +1,10 @@
+autogen-agentchat==0.4.0
+psycopg2-binary==2.9.9
+openai==1.54.5
+sqlparse==0.5.2
+pandas==2.2.3
+numpy==1.26.4
+asyncio==3.4.3
+asyncpg==0.29.0
+python-dotenv==1.0.1
+pydantic==2.10.3
