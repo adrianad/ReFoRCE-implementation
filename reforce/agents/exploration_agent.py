@@ -90,7 +90,7 @@ class ExplorationAgent(AssistantAgent):
         self.exploration_queries = []
         self.column_insights = {}
         self.improved_candidates = []
-        self.failed_candidates = []  # Store failed candidates from Stage 2/3
+        self.all_candidates = []  # Store all candidates from Stage 2/3
         self.voting_uncertainty = {}  # Store voting stage uncertainty data
     
     async def on_messages(
@@ -129,13 +129,13 @@ class ExplorationAgent(AssistantAgent):
             )
     
     def set_exploration_context(self, user_request: str, uncertain_areas: List[str], 
-                              failed_candidates: List[Dict] = None, voting_uncertainty: Dict = None):
-        """Set exploration context from VotingAgent with failed candidates"""
+                              all_candidates: List[Dict] = None, voting_uncertainty: Dict = None):
+        """Set exploration context from VotingAgent with all candidates"""
         self.user_request = user_request
         self.uncertain_areas = uncertain_areas
-        self.failed_candidates = failed_candidates or []
+        self.all_candidates = all_candidates or []
         self.voting_uncertainty = voting_uncertainty or {}
-        logger.info(f"Exploration context set with {len(uncertain_areas)} uncertain areas and {len(self.failed_candidates)} failed candidates")
+        logger.info(f"Exploration context set with {len(uncertain_areas)} uncertain areas and {len(self.all_candidates)} candidates")
     
     async def _explore_columns(self, request: str) -> str:
         """Perform comprehensive column exploration"""
@@ -555,12 +555,12 @@ Improved SQL Based on Exploration:
         return queries
     
     async def _find_relevant_tables_with_candidates(self, tables: List[str]) -> List[str]:
-        """Identify tables based on failed candidates and FK relationships"""
+        """Identify tables based on all candidates and FK relationships"""
         try:
-            # Analyze failed candidates to get referenced entities
-            candidate_analysis = self._analyze_failed_candidates()
+            # Analyze all candidates to get referenced entities
+            candidate_analysis = self._analyze_all_candidates()
             
-            # Start with tables from failed candidates
+            # Start with tables from all candidates
             relevant_tables = set(candidate_analysis['tables'])
             
             # Add tables based on search patterns and business terms
@@ -1409,9 +1409,9 @@ Please provide:
 
 I'll perform progressive exploration from simple to complex queries to resolve ambiguities."""
     
-    def _analyze_failed_candidates(self) -> Dict[str, List[str]]:
+    def _analyze_all_candidates(self) -> Dict[str, List[str]]:
         """
-        Analyze failed SQL candidates to extract referenced tables and columns
+        Analyze all SQL candidates to extract referenced tables and columns
         Returns dict with 'tables' and 'columns' lists for targeted exploration
         """
         referenced_entities = {
@@ -1420,7 +1420,7 @@ I'll perform progressive exploration from simple to complex queries to resolve a
             'patterns': set()
         }
         
-        for candidate in self.failed_candidates:
+        for candidate in self.all_candidates:
             sql = candidate.get('sql', '')
             error = candidate.get('error', '')
             
@@ -1448,7 +1448,7 @@ I'll perform progressive exploration from simple to complex queries to resolve a
             'patterns': list(referenced_entities['patterns'])
         }
         
-        logger.info(f"Extracted from failed candidates: {len(result['tables'])} tables, {len(result['columns'])} columns, {len(result['patterns'])} patterns")
+        logger.info(f"Extracted from all candidates: {len(result['tables'])} tables, {len(result['columns'])} columns, {len(result['patterns'])} patterns")
         return result
     
     def _extract_table_references(self, sql: str) -> List[str]:
